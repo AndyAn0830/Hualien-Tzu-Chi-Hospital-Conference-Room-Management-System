@@ -9,7 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;600;700&display=swap" rel="stylesheet"/>
   <style>
     * { margin:0; padding:0; box-sizing:border-box; }
-    body { font-family: 'Noto Sans TC', sans-serif; background:#f4f6f9; }
+    body { font-family: 'Noto Sans TC', sans-serif; background:#f4f6f9; font-size:16px; }
     #loading {
       position:fixed; inset:0; background:#1a3a5c;
       display:flex; flex-direction:column;
@@ -175,17 +175,24 @@ async function saveRoomData(roomId, data) {
 async function addCleaningRecord(record) {
   try {
     const id = Date.now().toString();
-    await firebase.database().ref(`cleaningRecords/${id}`).set({...record, id});
-  } catch(e) { console.error("addCleaningRecord error", e); }
+    const db = firebase.database();
+    await db.ref(`cleaningRecords/${id}`).set({...record, id, timestamp: id});
+    console.log("✅ 消毒紀錄已儲存:", id);
+    return true;
+  } catch(e) {
+    console.error("addCleaningRecord error", e);
+    alert("儲存失敗，請確認網路連線：" + e.message);
+    return false;
+  }
 }
 async function loadCleaningRecords() {
   try {
-    const snap = await firebase.database().ref("cleaningRecords").orderByChild("id").limitToLast(200).get();
+    const snap = await firebase.database().ref("cleaningRecords").get();
     if (snap.exists()) {
       const data = snap.val();
-      return Object.values(data).sort((a,b) => Number(b.id) - Number(a.id));
+      return Object.values(data).sort((a,b) => Number(b.timestamp||b.id) - Number(a.timestamp||a.id));
     }
-  } catch(e) {}
+  } catch(e) { console.error("loadCleaningRecords error", e); }
   return [];
 }
 
@@ -193,7 +200,12 @@ async function loadCleaningRecords() {
 async function loadKeyData(roomId) {
   try {
     const snap = await firebase.database().ref(`keys/${roomId}`).get();
-    if (snap.exists()) return snap.val();
+    if (snap.exists()) {
+      const data = snap.val();
+      // 確保 quantity 是數字
+      data.quantity = parseInt(data.quantity) || 1;
+      return data;
+    }
   } catch(e) {}
   return { quantity:1, records:{} };
 }
@@ -203,7 +215,7 @@ async function loadAllKeysData() {
   return result;
 }
 async function setKeyQuantity(roomId, qty) {
-  try { await firebase.database().ref(`keys/${roomId}/quantity`).set(qty); } catch(e) {}
+  try { await firebase.database().ref(`keys/${roomId}/quantity`).set(parseInt(qty) || 1); } catch(e) {}
 }
 async function addKeyRecord(roomId, record) {
   try {
@@ -1079,7 +1091,7 @@ function AdminPage({ onLogout }) {
       </div>
 
       <div style={{ background:"#fff", borderBottom:"1px solid #eee", display:"flex" }}>
-        <div onClick={()=>setAdminTab("schedule")} style={{ flex:1, textAlign:"center", padding:"12px 8px", cursor:"pointer", fontSize:13, fontWeight:700, borderBottom: adminTab==="schedule"?"3px solid #1e5799":"3px solid transparent", color: adminTab==="schedule"?"#1e5799":"#aaa" }}>
+        <div onClick={()=>setAdminTab("schedule")} style={{ flex:1, textAlign:"center", padding:"12px 8px", cursor:"pointer", fontSize:15, fontWeight:700, borderBottom: adminTab==="schedule"?"3px solid #1e5799":"3px solid transparent", color: adminTab==="schedule"?"#1e5799":"#aaa" }}>
           📅 排程管理
         </div>
         <div onClick={()=>setAdminTab("keys")} style={{ flex:1, textAlign:"center", padding:"12px 8px", cursor:"pointer", fontSize:13, fontWeight:700, borderBottom: adminTab==="keys"?"3px solid #f57c00":"3px solid transparent", color: adminTab==="keys"?"#f57c00":"#aaa" }}>
@@ -1259,15 +1271,16 @@ function KeyManagement() {
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:22 }}>
         {ROOMS.map(room => {
           const kd = allKeys[room.id] || { quantity:1, records:{} };
+          const qty = parseInt(kd.quantity) || 1;
           const active = getActiveCount(kd);
-          const avail = Math.max(0, kd.quantity - active);
+          const avail = Math.max(0, qty - active);
           const isEditing = editQty[room.id] !== undefined;
           return (
             <div key={room.id} style={{ background:"#fff", borderRadius:14, padding:"12px 14px", borderLeft:`4px solid ${room.color}`, boxShadow:"0 2px 8px rgba(0,0,0,0.05)" }}>
-              <div style={{ fontSize:11, color:room.color, fontWeight:700, marginBottom:6 }}>{room.icon} {room.name}</div>
+              <div style={{ fontSize:14, color:room.color, fontWeight:700, marginBottom:6 }}>{room.icon} {room.name}</div>
               <div style={{ display:"flex", alignItems:"baseline", gap:4, marginBottom:6 }}>
-                <span style={{ fontSize:22, fontWeight:800, color: avail>0?"#2e7d32":"#c62828" }}>{avail}</span>
-                <span style={{ fontSize:12, color:"#aaa" }}>/ {kd.quantity} 把可借</span>
+                <span style={{ fontSize:28, fontWeight:800, color: avail>0?"#2e7d32":"#c62828" }}>{avail}</span>
+                <span style={{ fontSize:12, color:"#aaa" }}>/ {qty} 把可借</span>
               </div>
               {isEditing ? (
                 <div style={{ display:"flex", gap:5, alignItems:"center" }}>
@@ -1278,7 +1291,7 @@ function KeyManagement() {
                   <button onClick={()=>setEditQty(p=>{const x={...p};delete x[room.id];return x;})} style={{ padding:"4px 8px", background:"#f0f0f0", color:"#555", border:"none", borderRadius:8, fontSize:12, cursor:"pointer" }}>✕</button>
                 </div>
               ) : (
-                <button onClick={()=>setEditQty(p=>({...p,[room.id]:String(kd.quantity)}))} style={{ fontSize:11, color:"#888", background:"#f5f5f5", border:"none", borderRadius:8, padding:"4px 10px", cursor:"pointer", fontFamily:"inherit" }}>
+                <button onClick={()=>setEditQty(p=>({...p,[room.id]:String(qty)}))} style={{ fontSize:11, color:"#888", background:"#f5f5f5", border:"none", borderRadius:8, padding:"4px 10px", cursor:"pointer", fontFamily:"inherit" }}>
                   ✎ 設定數量
                 </button>
               )}
@@ -1312,8 +1325,8 @@ function KeyManagement() {
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
             <div style={{ flex:1 }}>
               <div style={{ fontSize:11, color:b.roomColor, fontWeight:700, marginBottom:4 }}>{b.roomIcon} {b.roomName}</div>
-              <div style={{ fontSize:15, fontWeight:700, color:"#333" }}>{b.borrower}</div>
-              <div style={{ fontSize:12, color:"#888", marginTop:2 }}>🏢 {b.unit}　📞 {b.ext}</div>
+              <div style={{ fontSize:18, fontWeight:700, color:"#333" }}>{b.borrower}</div>
+              <div style={{ fontSize:15, color:"#888", marginTop:2 }}>🏢 {b.unit}　📞 {b.ext}</div>
               <div style={{ fontSize:11, color:"#bbb", marginTop:2 }}>⏰ {b.borrowTime}</div>
               {b.isTemp && <div style={{ fontSize:11, color:"#f57c00", marginTop:3, background:"#fff8e1", padding:"3px 8px", borderRadius:6, display:"inline-block" }}>
                 🕐 臨時借用{b.notes ? `：${b.notes}` : ""}
@@ -1360,11 +1373,11 @@ function KeyManagement() {
 function CleaningInputField({ label, value, onChange, placeholder, required, type }) {
   return (
     <div style={{ marginBottom:16 }}>
-      <label style={{ fontSize:13, color:"#444", fontWeight:600, display:"block", marginBottom:6 }}>
+      <label style={{ fontSize:15, color:"#444", fontWeight:600, display:"block", marginBottom:6 }}>
         {label}{required && <span style={{ color:"#e53935" }}> *</span>}
       </label>
       <input type={type||"text"} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder}
-        style={{ width:"100%", padding:"11px 14px", border:"2px solid #e8e8e8", borderRadius:10, fontSize:14, outline:"none", boxSizing:"border-box", fontFamily:"inherit" }}
+        style={{ width:"100%", padding:"11px 14px", border:"2px solid #e8e8e8", borderRadius:10, fontSize:16, outline:"none", boxSizing:"border-box", fontFamily:"inherit" }}
         onFocus={e=>e.target.style.borderColor="#1e5799"}
         onBlur={e=>e.target.style.borderColor="#e8e8e8"}
       />
@@ -1402,9 +1415,9 @@ function CleaningForm({ onBack }) {
       batteryRefilled: form.isOccupied === "no" ? form.batteryRefilled : "",
       lastUnit: form.isOccupied === "no" ? form.lastUnit : "",
     };
-    await addCleaningRecord(record);
+    const ok = await addCleaningRecord(record);
     setSubmitting(false);
-    setStep(4);
+    if (ok) setStep(4);
   }
 
   const accentColor = "#1e5799";
@@ -1423,7 +1436,7 @@ function CleaningForm({ onBack }) {
           <CleaningInputField label="填寫時間" value={form.time} onChange={v=>setF("time",v)} placeholder="例：2026-04-22 14:30" required/>
           <CleaningInputField label="填寫人姓名" value={form.name} onChange={v=>setF("name",v)} placeholder="請輸入姓名" required/>
           <div style={{ marginBottom:16 }}>
-            <label style={{ fontSize:13, color:"#444", fontWeight:600, display:"block", marginBottom:6 }}>會議室名稱 <span style={{ color:"#e53935" }}>*</span></label>
+            <label style={{ fontSize:15, color:"#444", fontWeight:600, display:"block", marginBottom:6 }}>會議室名稱 <span style={{ color:"#e53935" }}>*</span></label>
             <select value={form.roomId} onChange={e=>setF("roomId",e.target.value)}
               style={{ width:"100%", padding:"11px 14px", border:"2px solid #e8e8e8", borderRadius:10, fontSize:14, outline:"none", boxSizing:"border-box", fontFamily:"inherit", background:"#fff" }}>
               <option value="">請選擇會議室</option>
